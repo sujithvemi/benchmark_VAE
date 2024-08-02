@@ -17,6 +17,7 @@ from pythae.models.nn.benchmarks.utils import ResBlock
 from pythae.trainers import BaseTrainer, BaseTrainerConfig
 # from sklearn.model_selection import train_test_split
 from multiprocessing import Pool
+import argparse
 
 logger = logging.getLogger(__name__)
 console = logging.StreamHandler()
@@ -31,12 +32,12 @@ class ConvResBlock(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, 2, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(device=torch.device("cuda"))
+            nn.LeakyReLU()
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, 3, 1, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(device=torch.device("cuda"))
+            nn.LeakyReLU()
         )
         self.ds = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 1, 2, padding=0),
@@ -49,7 +50,7 @@ class ConvResBlock(nn.Module):
         # print("conv1_op device: ", conv1_op.get_device())
         # print("conv2_op device: ", conv2_op.get_device())
         # print("skip_op device: ", skip_op.get_device())
-        return nn.LeakyReLU(device=torch.device("cuda"))(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
+        return nn.LeakyReLU()(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
     
 class DeconvResBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -57,12 +58,12 @@ class DeconvResBlock(nn.Module):
         self.conv1 = nn.Sequential(
             nn.ConvTranspose2d(in_channels, out_channels, 3, 2, padding=1, output_padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(device=torch.device("cuda"))
+            nn.LeakyReLU()
         )
         self.conv2 = nn.Sequential(
             nn.ConvTranspose2d(out_channels, out_channels, 3, 1, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(device=torch.device("cuda"))
+            nn.LeakyReLU()
         )
         self.us = nn.Sequential(
             nn.ConvTranspose2d(in_channels, out_channels, 1, 2, padding=0, output_padding=1),
@@ -73,7 +74,7 @@ class DeconvResBlock(nn.Module):
         skip_op = self.us(x)
         conv1_op = self.conv1(x)
         conv2_op = self.conv2(conv1_op)
-        return nn.LeakyReLU(device=torch.device("cuda"))(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
+        return nn.LeakyReLU()(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
 
 class Encoder_Res_VAE_new_dSprites(BaseEncoder):
     def __init__(self, args):
@@ -135,7 +136,7 @@ class Decoder_Res_AE_new_dSprites(BaseDecoder):
 
 class NewDSprites(Dataset):
     def __init__(self, data_file_path=None, transforms=None):
-        self.imgs_arr = np.load(data_file_path, allow_pickle=True)["imgs"]
+        self.imgs_arr = np.load(data_file_path, mmap_mode="r")
         self.transforms = transforms
 
     def __len__(self):
@@ -150,11 +151,6 @@ class NewDSprites(Dataset):
         return DatasetOutput(data=img_copy)
 
 img_transforms = transforms.Compose([transforms.ToTensor()])
-
-dataset = NewDSprites(
-    data_file_path="../../data/new_dSprites_256x256.npz",
-    transforms=img_transforms,
-)
 
 
 # for i in model.named_parameters():
@@ -172,13 +168,18 @@ def multivae_pipelines(vae_type):
             # reconstruction_loss="bce"
         )
         
+        vae_dataset = NewDSprites(
+	    data_file_path="../../data/new_dSprites_256x256_imgs.npy",
+	    transforms=img_transforms,
+	)
+        
         training_config = BaseTrainerConfig(
             output_dir='res_vanilla_vae_multivae_train_v1',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
-            learning_rate=5e-3,
-            per_device_train_batch_size=128,
-            per_device_eval_batch_size=128,
+            learning_rate=1e-3,
+            per_device_train_batch_size=64,
+            per_device_eval_batch_size=64,
             steps_saving=5,
             optimizer_cls="AdamW",
             optimizer_params={"weight_decay": 0.05},
@@ -213,7 +214,7 @@ def multivae_pipelines(vae_type):
         )
 
         pipeline(
-            train_data=dataset,
+            train_data=vae_dataset,
             callbacks=callbacks
         )
     elif vae_type == "beta_vae":
@@ -224,18 +225,23 @@ def multivae_pipelines(vae_type):
             # reconstruction_loss="bce"
         )
         
+        beta_vae_dataset = NewDSprites(
+	    data_file_path="../../data/new_dSprites_256x256_imgs.npy",
+	    transforms=img_transforms,
+	)
+        
         training_config = BaseTrainerConfig(
             output_dir='res_beta_vae_multivae_train_v1',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
-            learning_rate=5e-3,
+            learning_rate=1e-4,
             per_device_train_batch_size=128,
             per_device_eval_batch_size=128,
             steps_saving=5,
             optimizer_cls="AdamW",
             optimizer_params={"weight_decay": 0.05},
             scheduler_cls="ReduceLROnPlateau",
-            scheduler_params={"patience": 5, "factor": 0.1},
+            scheduler_params={"patience": 5, "factor": 0.5},
             no_cuda=False,
             num_epochs=100
         )
@@ -265,7 +271,7 @@ def multivae_pipelines(vae_type):
         )
 
         pipeline(
-            train_data=dataset,
+            train_data=beta_vae_dataset,
             callbacks=callbacks
         )
     elif vae_type == "beta_tcvae":
@@ -276,18 +282,23 @@ def multivae_pipelines(vae_type):
             # reconstruction_loss="bce"
         )
         
+        beta_tcvae_dataset = NewDSprites(
+	    data_file_path="../../data/new_dSprites_256x256_imgs.npy",
+	    transforms=img_transforms,
+	)
+        
         training_config = BaseTrainerConfig(
             output_dir='res_beta_tcvae_multivae_train_v1',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
-            learning_rate=5e-3,
+            learning_rate=1e-4,
             per_device_train_batch_size=128,
             per_device_eval_batch_size=128,
             steps_saving=5,
             optimizer_cls="AdamW",
             optimizer_params={"weight_decay": 0.05},
             scheduler_cls="ReduceLROnPlateau",
-            scheduler_params={"patience": 5, "factor": 0.1},
+            scheduler_params={"patience": 5, "factor": 0.5},
             no_cuda=False,
             num_epochs=100
         )
@@ -317,10 +328,15 @@ def multivae_pipelines(vae_type):
         )
 
         pipeline(
-            train_data=dataset,
+            train_data=beta_tcvae_dataset,
             callbacks=callbacks
         )
         
 if __name__ == "__main__":
-    with Pool(3) as p:
-        p.map(multivae_pipelines, ["vanilla_vae", "beta_vae", "beta_tcvae"])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model")
+    args = parser.parse_args()
+    model_name = args.model
+    multivae_pipelines(model_name)
+    #with Pool(3) as p:
+     #   p.map(multivae_pipelines, ["vanilla_vae", "beta_vae", "beta_tcvae"])
