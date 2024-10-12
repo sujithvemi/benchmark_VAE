@@ -186,7 +186,7 @@ def multivae_pipelines(vae_type):
             scheduler_cls="ReduceLROnPlateau",
             scheduler_params={"patience": 5, "factor": 0.1},
             no_cuda=False,
-            num_epochs=100
+            num_epochs=150
         )
 
         vae_encoder = Encoder_Res_VAE_new_dSprites(vae_config)
@@ -231,7 +231,7 @@ def multivae_pipelines(vae_type):
 	)
         
         training_config = BaseTrainerConfig(
-            output_dir='res_beta_vae_multivae_train_v1',
+            output_dir='res_beta_vae_multivae_train_v1_corrected_model',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
             learning_rate=1e-4,
@@ -243,13 +243,13 @@ def multivae_pipelines(vae_type):
             scheduler_cls="ReduceLROnPlateau",
             scheduler_params={"patience": 5, "factor": 0.5},
             no_cuda=False,
-            num_epochs=100
+            num_epochs=150
         )
 
         beta_vae_encoder = Encoder_Res_VAE_new_dSprites(beta_vae_config)
         beta_vae_decoder = Decoder_Res_AE_new_dSprites(beta_vae_config)
 
-        beta_vae_model = VAE(model_config=beta_vae_config, encoder=beta_vae_encoder, decoder=beta_vae_decoder).to("cuda:0")
+        beta_vae_model = BetaVAE(model_config=beta_vae_config, encoder=beta_vae_encoder, decoder=beta_vae_decoder).to("cuda:0")
         
         print("Training Beta VAE")
         print(beta_vae_model)
@@ -306,7 +306,7 @@ def multivae_pipelines(vae_type):
         beta_tcvae_encoder = Encoder_Res_VAE_new_dSprites(beta_tcvae_config)
         beta_tcvae_decoder = Decoder_Res_AE_new_dSprites(beta_tcvae_config)
 
-        beta_tcvae_model = VAE(model_config=beta_tcvae_config, encoder=beta_tcvae_encoder, decoder=beta_tcvae_decoder).to("cuda:0")
+        beta_tcvae_model = BetaTCVAE(model_config=beta_tcvae_config, encoder=beta_tcvae_encoder, decoder=beta_tcvae_decoder).to("cuda:0")
         
         print("Training Beta TCVAE")
         print(beta_tcvae_model)
