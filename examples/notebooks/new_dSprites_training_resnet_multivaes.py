@@ -4,7 +4,7 @@ import time
 
 import torch
 import torch.nn as nn
-import torch.nn.Functional as F
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -56,8 +56,9 @@ class ConvResBlock(nn.Module):
         return nn.PReLU(device="cuda")(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
     
 class DeconvResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, is_last = False):
         super().__init__()
+        self.is_last = is_last
         self.conv1 = nn.Sequential(
             nn.ConvTranspose2d(in_channels, out_channels, 3, 2, padding=1, output_padding=1),
             nn.BatchNorm2d(out_channels),
@@ -79,7 +80,10 @@ class DeconvResBlock(nn.Module):
         skip_op = self.us(x)
         conv1_op = self.conv1(x)
         conv2_op = self.conv2(conv1_op)
-        return nn.PReLU(device="cuda")(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
+        if not self.is_last:
+            return nn.PReLU(device="cuda")(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
+        else:
+            return nn.Sigmoid()(conv2_op.to("cuda:0") + skip_op.to("cuda:0"))
 
 class Encoder_Res_VAE_new_dSprites(BaseEncoder):
     def __init__(self, args):
@@ -103,12 +107,18 @@ class Encoder_Res_VAE_new_dSprites(BaseEncoder):
         self.lin2 = nn.Linear(512, 256)
         self.embedding = nn.Linear(256, args.latent_dim)
         self.log_var = nn.Linear(256, args.latent_dim)
+        self.lin_1_activation = nn.PReLU(device="cuda")
+        self.lin_2_activation = nn.PReLU(device="cuda")
 
     def forward(self, x: torch.Tensor):
         h1 = self.conv_layers(x).reshape(x.shape[0], -1)
+        x = self.lin1(h1)
+        x = self.lin_1_activation(x)
+        x = self.lin2(x)
+        x = self.lin_2_activation(x)
         output = ModelOutput(
-            embedding=self.embedding(F.prelu(self.lin2(F.prelu(self.lin1(h1))))),
-            log_covariance=self.log_var(self.lin2(self.lin1(h1)))
+            embedding=self.embedding(x),
+            log_covariance=self.log_var(x)
         )
         return output
 
@@ -122,6 +132,9 @@ class Decoder_Res_AE_new_dSprites(BaseDecoder):
         self.fc1 = nn.Linear(args.latent_dim, 256)
         self.fc2 = nn.Linear(256, 512)
         self.fc3 = nn.Linear(512, 1024)
+        self.fc1_activation = nn.PReLU(device="cuda")
+        self.fc2_activation = nn.PReLU(device="cuda")
+        self.fc3_activation = nn.PReLU(device="cuda")
         self.deconv_layers = nn.Sequential(
             DeconvResBlock(1024, 512),
             DeconvResBlock(512, 512),
@@ -130,11 +143,17 @@ class Decoder_Res_AE_new_dSprites(BaseDecoder):
             DeconvResBlock(256, 128),
             DeconvResBlock(128, 64),
             DeconvResBlock(64, 32),
-            DeconvResBlock(32, 1),
+            DeconvResBlock(32, 1, is_last=True),
         )
 
     def forward(self, z: torch.Tensor):
-        h1 = F.prelu(self.fc3(F.prelu(self.fc2(F.prelu(self.fc1(z)))))).reshape(z.shape[0], 1024, 1, 1)
+        x = self.fc1(z)
+        x = self.fc1_activation(x)
+        x = self.fc2(x)
+        x = self.fc2_activation(x)
+        x = self.fc3(x)
+        x = self.fc3_activation(x)
+        h1 = x.reshape(z.shape[0], 1024, 1, 1)
         output = ModelOutput(reconstruction=self.deconv_layers(h1))
 
         return output
@@ -170,7 +189,7 @@ def multivae_pipelines(vae_type):
         vae_config = VAEConfig(
             input_dim=(1, 256, 256),
             latent_dim=8,
-            # reconstruction_loss="bce"
+            reconstruction_loss="bce"
         )
         
         vae_dataset = NewDSprites(
@@ -179,7 +198,7 @@ def multivae_pipelines(vae_type):
 	)
         
         training_config = BaseTrainerConfig(
-            output_dir='res_vanilla_vae_multivae_train_v2',
+            output_dir='res_vanilla_vae_multivae_train_bce_v3',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
             learning_rate=1e-4,
@@ -207,7 +226,7 @@ def multivae_pipelines(vae_type):
         wandb_cb.setup(
             training_config,
             model_config=vae_config,
-            project_name="multimodal_llm_robustness_exp_resnets",
+            project_name="multimodal_llm_robustness_exp_resnets_bce",
             entity_name="sujithvemi-Synechron",
         )
 
@@ -227,7 +246,7 @@ def multivae_pipelines(vae_type):
             input_dim=(1, 256, 256),
             latent_dim=8,
             beta = 4,
-            # reconstruction_loss="bce"
+            reconstruction_loss="bce"
         )
         
         beta_vae_dataset = NewDSprites(
@@ -236,7 +255,7 @@ def multivae_pipelines(vae_type):
 	)
         
         training_config = BaseTrainerConfig(
-            output_dir='res_beta_vae_multivae_train_v2_corrected_model',
+            output_dir='res_beta_vae_multivae_train_bce_v3',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
             learning_rate=1e-4,
@@ -264,7 +283,7 @@ def multivae_pipelines(vae_type):
         wandb_cb.setup(
             training_config,
             model_config=beta_vae_config,
-            project_name="multimodal_llm_robustness_exp_resnets",
+            project_name="multimodal_llm_robustness_exp_resnets_bce",
             entity_name="sujithvemi-Synechron",
         )
 
@@ -284,7 +303,7 @@ def multivae_pipelines(vae_type):
             input_dim=(1, 256, 256),
             latent_dim=8,
             beta = 6,
-            # reconstruction_loss="bce"
+            reconstruction_loss="bce"
         )
         
         beta_tcvae_dataset = NewDSprites(
@@ -293,7 +312,7 @@ def multivae_pipelines(vae_type):
 	)
         
         training_config = BaseTrainerConfig(
-            output_dir='res_beta_tcvae_multivae_train_v2_corrected_model',
+            output_dir='res_beta_tcvae_multivae_train_bce_v3',
             # train_dataloader_num_workers=8,
             # eval_dataloader_num_workers=8,
             learning_rate=1e-4,
@@ -321,7 +340,7 @@ def multivae_pipelines(vae_type):
         wandb_cb.setup(
             training_config,
             model_config=beta_tcvae_config,
-            project_name="multimodal_llm_robustness_exp_resnets",
+            project_name="multimodal_llm_robustness_exp_resnets_bce",
             entity_name="sujithvemi-Synechron",
         )
 
